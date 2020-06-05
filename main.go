@@ -111,7 +111,7 @@ func syncCertToSecret() error {
 
 	var filename string
 	for _, file := range folders {
-		filename = file.Name()
+		filename = filepath.Join(*certPath, file.Name())
 		if certRegex.MatchString(filename) {
 			logrus.Debugf("found file %s to sync", filename)
 			break //only sync the first found
@@ -119,28 +119,33 @@ func syncCertToSecret() error {
 	}
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
-		return err
+		return fmt.Errorf("cound not read file %s: %w", filename, err)
 	}
 
 	isPrivateKey := bytes.Contains(content, []byte("PRIVATE KEY"))
 
 	var certFile, keyFile string
-	for _, secondFile := range folders {
+	for _, f := range folders {
+		secondFile := filepath.Join(*certPath, f.Name())
 		if isPrivateKey {
-			_, err = tls.LoadX509KeyPair(secondFile.Name(), filename)
+			_, err = tls.LoadX509KeyPair(secondFile, filename)
 			if err == nil {
-				certFile = secondFile.Name()
+				certFile = secondFile
 				keyFile = filename
 				break
 			}
 		} else {
-			_, err = tls.LoadX509KeyPair(filename, secondFile.Name())
+			_, err = tls.LoadX509KeyPair(filename, secondFile)
 			if err == nil {
-				certFile = secondFile.Name()
-				keyFile = filename
+				certFile = filename
+				keyFile = secondFile
 				break
 			}
 		}
+	}
+
+	if err != nil {
+		return err
 	}
 
 	logrus.Debugf("found cert %s", certFile)
@@ -186,12 +191,14 @@ func CreateOrUpdateSecret(secret *v1.Secret) error {
 		if err != nil {
 			return fmt.Errorf("creating secrets object failed: %w", err)
 		}
+		logrus.Debugf("created secret %s successfully in namespace %s", secret.GetName(), namespace)
 	} else {
 		secret.ResourceVersion = secrets.ResourceVersion
 		_, err = secretsClient.Update(secret)
 		if err != nil {
 			return fmt.Errorf("updating secrets object failed: %w", err)
 		}
+		logrus.Debugf("updated secret %s successfully in namespace %s", secret.GetName(), namespace)
 	}
 
 	return nil
